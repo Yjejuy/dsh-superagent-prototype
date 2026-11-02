@@ -38,7 +38,7 @@ The existing DSH read-only Linear MCP integration stays independent; it cannot s
 
 ## Label dispatch
 
-Set **Team UUID**, optionally **Project UUID**, **Required issue label** to `superagent`, **Dispatch by** to Label + status, and **Dispatch statuses** to `Todo` (or the exact statuses you use, comma-separated).
+Set **Team UUID**, optionally **Project UUID**, **Required issue label** to `superagent`, **Dispatch by** to Label, and **Dispatch statuses** to `Todo` (or the exact statuses you use, comma-separated).
 Set the allowed Linear user UUIDs in Eval for follow-up comments.
 Add this admission row to Linear's Policy: `issues.unlistedUnaddressed = inferred`.
 A label snapshot has no reliable author for the label change: the Source deliberately records no human authorization for it.

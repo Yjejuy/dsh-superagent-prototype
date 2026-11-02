@@ -33,9 +33,10 @@ export const linearKind: SourceKind<LinearConfig> = {
   schema: LinearConfig, health: [LINEAR],
   fields: [field('cli', 'Bridge wrapper', '桥接命令', { en: 'Absolute wrapper path. Keep the API credential in a private file, never in these settings.', zh: '包装脚本的绝对路径。凭据保存在私有文件中，不填入设置。' }),
     field('teamId', 'Team UUID', '团队 UUID'), field('projectId', 'Project UUID (optional)', '项目 UUID（可选）'),
-    { key: 'dispatch', type: 'select', label: { en: 'Dispatch by', zh: '派单方式' }, options: [
-      { value: 'label', label: { en: 'Label + status (inferred)', zh: '标签 + 状态（推断任务）' } },
-      { value: 'comment', label: { en: 'Mention in a comment', zh: '评论中提及' } }] },
+    { key: 'dispatch', type: 'select', label: { en: 'Dispatch by', zh: '派单方式' },
+      hint: { en: 'Label dispatch uses the configured statuses and assessment rules; comment dispatch requires an allowed user mention.', zh: '标签派单按状态和评估规则接单；评论派单需要允许的用户使用命令前缀。' }, options: [
+      { value: 'label', label: { en: 'Label', zh: '标签' } },
+      { value: 'comment', label: { en: 'Comment', zh: '评论' } }] },
     field('label', 'Required issue label', '必需的 Issue 标签'), field('states', 'Dispatch statuses (comma-separated)', '派单状态（逗号分隔）'),
     field('mention', 'Comment mention', '评论命令前缀'),
     { key: 'pollSeconds', type: 'number', min: 60, max: 3600, advanced: true, label: { en: 'Poll seconds', zh: '轮询秒数' } }],
