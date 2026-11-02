@@ -10,3 +10,6 @@
 # Feishu is optional: uncomment to enable its Source, then set the bot's lark-cli on the Feishu Source.
 # - id: dsh-superagent-feishu
 #   disabled: false
+# Linear Issue dispatch is optional; configure its account wrapper/team in Settings → Sources.
+# - id: dsh-superagent-linear
+#   disabled: false

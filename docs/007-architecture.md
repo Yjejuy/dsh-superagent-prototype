@@ -359,6 +359,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/infra/text.ts` | Word counts and the chat message limit, `fill` and `sameName` |
 | `src/infra/health.ts` | The `HealthBoard`, every part's health entry, each claimed by its one writer |
 | `src/sources/kind.ts` | The `SourceKind` protocol |
+| `src/sources/linear.ts` | Opt-in Linear Issue Source, scoped polling, policy, reply channel and original thread context, exported as `./linear-watch` |
+| `src/sources/linear-protocol.ts` | Validated bridge records and stable Linear Issue/comment Trigger identities |
 | `src/sources/registry.ts` | `SourceRegistry` |
 | `src/sources/host.ts` | `SourceHost`, `SourceContext`, `Health`, `health` and the fixed health texts |
 | `src/sources/poll.ts` | What GitHub and Feishu polling share: `POLL_HORIZON_MS`, `polled`, `cursorAt`, and `pollThreads`, which keeps a failure on its Thread as `pollError` |
@@ -408,6 +410,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
+| `tests/linear.spec.ts` | Linear label dispatch, scope, paginated polling, replay/abort, comment follow-ups, replies and plugin lifecycle |
+| `tests/linear-bridge.spec.ts` | Private GraphQL bridge: idempotent writes, identity, moved destinations, scoped filters and sanitized errors |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |
