@@ -5,6 +5,7 @@ import { Commands } from '../src/infra/commands.ts'
 import { Setup } from '../src/app/setup.ts'
 import { SettingsConflict } from '../src/app/settings.ts'
 import { startRuntime, type Host } from './fixtures/host.ts'
+import { linearKind } from '../src/sources/linear.ts'
 
 let h: Host | undefined
 afterEach(async () => { await h?.stop(); h = undefined })
@@ -14,6 +15,18 @@ function deferred<T>() {
   return { promise, resolve }
 }
 const model = { provider: 'worker-provider', model: 'worker-model' }
+
+it('keeps Linear account wrappers panel-only and loads its skill only when enabled', async () => {
+  h = await startRuntime()
+  const { settings, sources, store, prompts } = h.runtime
+  sources.register(linearKind)
+  expect(prompts.skills(prompts.current().config).map(([name]) => name)).not.toContain('linear')
+  const value = { enabled: true, config: { cli: '/opt/linear-agent', teamId: '11111111-1111-4111-8111-111111111111' } }
+  await expect(settings.save('source:linear', value, 0, 'tool')).rejects.toThrow(new UserError('panelOnlyAccounts'))
+  await settings.save('source:linear', value, 0, 'panel')
+  expect(store.settings().sources.linear!.config.cli).toBe('/opt/linear-agent')
+  expect(prompts.skills(prompts.current().config).map(([name]) => name)).toContain('linear')
+})
 
 it('refuses a save of a block that another save changed during its model or account check, and saves nothing of it', async () => {
   h = await startRuntime()

@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Trusted Linear GraphQL bridge. API credentials stay in a private file, never in argv or tool output."""
+import argparse
+import json
+from pathlib import Path
+import re
+import sys
+import urllib.error
+import urllib.request
+import uuid
+
+ENDPOINT = 'https://api.linear.app/graphql'
+ISSUE = '''id identifier title description url createdAt updatedAt
+team { id key } project { id } state { name type } creator { id name }
+labels(first: 100) { nodes { name } pageInfo { hasNextPage } }'''
+COMMENT = 'id body url createdAt updatedAt user { id name }'
+PAGE = 'pageInfo { hasNextPage endCursor }'
+NAMESPACE = uuid.UUID('eac0200c-7689-4ed6-890e-82cf49778857')
+
+
+class BridgeError(Exception):
+    def __init__(self, message, code=500):
+        super().__init__(message)
+        self.code = code
+
+
+class Client:
+    def __init__(self, credential_file):
+        try:
+            credential = Path(credential_file).expanduser().read_text().strip()
+        except OSError:
+            raise BridgeError('Cannot read the Linear credential file', 401) from None
+        if not credential or '\n' in credential or '\r' in credential:
+            raise BridgeError('Invalid Linear credential file', 401)
+        self.authorization = credential if credential.startswith(('lin_api_', 'Bearer ')) else 'Bearer ' + credential
+
+    def query(self, query, variables=None):
+        request = urllib.request.Request(ENDPOINT, data=json.dumps({'query': query, 'variables': variables or {}}).encode(),
+                                         headers={'Authorization': self.authorization, 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = response.read(8 * 1024 * 1024 + 1)
+            if len(payload) > 8 * 1024 * 1024:
+                raise BridgeError('Linear response exceeded 8 MiB')
+            result = json.loads(payload)
+        except urllib.error.HTTPError as error:
+            raise BridgeError(f'Linear HTTP {error.code}; check credentials, permissions or rate limits', error.code) from None
+        except (OSError, ValueError):
+            raise BridgeError('Linear request failed; check network access and proxy configuration') from None
+        if result.get('errors'):
+            # Never echo arbitrary remote error text: it can contain supplied arguments or identity information.
+            raise BridgeError('Linear GraphQL request failed; check API permissions and bridge schema compatibility')
+        if not isinstance(result.get('data'), dict):
+            raise BridgeError('Linear returned no data')
+        return result['data']
+
+
+def issue_filter(args):
+    result = {'team': {'id': {'eq': args.team}}, 'labels': {'name': {'eq': args.label}}}
+    if args.project:
+        result['project'] = {'id': {'eq': args.project}}
+    return result
+
+
+def comment_id(key):
+    return str(uuid.uuid5(NAMESPACE, key))
+
+
+def own_reply(comment, viewer):
+    """Text alone cannot suppress an event; the remote ID and authenticated author must also match."""
+    match = re.search(r'\[dsh-superagent:([^\]\r\n]+)\]\s*$', comment.get('body') or '')
+    return bool(match and (comment.get('user') or {}).get('id') == viewer
+                and comment.get('id') == comment_id(match.group(1)))
+
+
+def issue_in_scope(issue, args):
+    return issue['team']['id'] == args.team and (not args.project or (issue.get('project') or {}).get('id') == args.project)
+
+
+def run(client, args):
+    if args.operation == 'identity':
+        return client.query('query { viewer { id name } }')['viewer']
+    if args.operation == 'issues':
+        filt = issue_filter(args)
+        filt['state'] = {'name': {'in': [state.strip() for state in args.states.split(',') if state.strip()]}}
+        return client.query('query($filter: IssueFilter, $after: String) { issues(first: 50, after: $after, '
+                            'filter: $filter, orderBy: updatedAt) { nodes { ' + ISSUE + ' } ' + PAGE + ' } }',
+                            {'filter': filt, 'after': args.after})['issues']
+    if args.operation == 'comments':
+        data = client.query('query($filter: CommentFilter, $after: String) { viewer { id } comments(first: 50, after: $after, '
+                            'filter: $filter, orderBy: updatedAt) { nodes { ' + COMMENT + ' issue { ' + ISSUE + ' } } ' + PAGE + ' } }',
+                            {'filter': {'issue': issue_filter(args), 'updatedAt': {'gte': args.since}}, 'after': args.after})
+        page = data['comments']
+        for comment in page['nodes']:
+            comment['own'] = own_reply(comment, data['viewer']['id'])
+        return page
+    if args.operation == 'issue':
+        return client.query('query($id: String!) { issue(id: $id) { ' + ISSUE + ' } }', {'id': args.id})['issue']
+    if args.operation == 'thread':
+        data = client.query('query($id: String!, $after: String) { issue(id: $id) { comments(first: 50, after: $after) { nodes { '
+                            + COMMENT + ' } ' + PAGE + ' } } }', {'id': args.issue, 'after': args.after})
+        return data['issue']['comments']
+    if args.operation == 'reply':
+        issue = client.query('query($id: String!) { issue(id: $id) { id team { id } project { id } } }', {'id': args.issue})['issue']
+        if not issue or not issue_in_scope(issue, args):
+            raise BridgeError('Linear reply issue moved outside the accepted team/project scope', 410)
+        reply_id = comment_id(args.key)
+        # A retried create uses the same remote UUID. Successful-but-timed-out writes can be found without scanning comments.
+        found = client.query('query($id: CommentFilter) { comments(first: 1, filter: $id) { nodes { id body issue { id } } } }',
+                             {'id': {'id': {'eq': reply_id}}})['comments']['nodes']
+        body = f'{args.text}\n\n[dsh-superagent:{args.key}]'
+        if found:
+            if found[0]['issue']['id'] != args.issue or found[0]['body'] != body:
+                raise BridgeError('Linear reply ID already exists with different content', 409)
+            return {'sent': True}
+        result = client.query('mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id } } }',
+                              {'input': {'id': reply_id, 'issueId': args.issue, 'body': body}})['commentCreate']
+        if not result.get('success') or (result.get('comment') or {}).get('id') != reply_id:
+            raise BridgeError('Linear did not confirm comment creation')
+        return {'sent': True}
+    raise BridgeError('Unknown Linear bridge operation', 400)
+
+
+def parser():
+    result = argparse.ArgumentParser(description=__doc__)
+    result.add_argument('--credential-file', required=True)
+    sub = result.add_subparsers(dest='operation', required=True)
+    sub.add_parser('identity')
+    for operation in ['issues', 'comments']:
+        child = sub.add_parser(operation)
+        child.add_argument('--team', required=True)
+        child.add_argument('--project', default='')
+        child.add_argument('--label', required=True)
+        child.add_argument('--after')
+        child.add_argument('--states', required=True) if operation == 'issues' else child.add_argument('--since', required=True)
+    sub.add_parser('issue').add_argument('--id', required=True)
+    thread = sub.add_parser('thread')
+    thread.add_argument('--issue', required=True)
+    thread.add_argument('--after')
+    reply = sub.add_parser('reply')
+    for field in ['issue', 'team', 'key', 'text']:
+        reply.add_argument('--' + field, required=True)
+    reply.add_argument('--project', default='')
+    return result
+
+
+def main():
+    args = parser().parse_args()
+    try:
+        print(json.dumps(run(Client(args.credential_file), args)))
+    except BridgeError as error:
+        print(json.dumps({'error': {'code': error.code, 'message': str(error)}}), file=sys.stderr)
+        return 1
+    except Exception:
+        print(json.dumps({'error': {'code': 500, 'message': 'Unexpected Linear bridge response; no credentials were printed'}}), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

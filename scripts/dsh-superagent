@@ -60,7 +60,16 @@ def ps(*options, check=False):
     for line in result.stdout.splitlines():
         parts = line.split(None, 2)
         if len(parts) == 3 and parts[0].isdigit():
-            yield int(parts[0]), parts[1], parts[2].split()
+            name = parts[1]
+            # Node 24 can name its Linux main thread MainThread instead of node.
+            # Check the executable as well so status/stop still recognize it.
+            if name == 'MainThread':
+                try:
+                    if Path(f'/proc/{parts[0]}/exe').resolve(strict=True).name == 'node':
+                        name = 'node'
+                except OSError:
+                    pass
+            yield int(parts[0]), name, parts[2].split()
 
 
 def running(pid, profile):
@@ -83,7 +92,9 @@ def state(url):
     request = urllib.request.Request(url.rstrip('/') + '/orchestrator/api/state',
                                      headers={'x-orchestrator-request': '1'})
     try:
-        with urllib.request.urlopen(request, timeout=2) as response:
+        # This is a local control endpoint; never send it through a user proxy.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=2) as response:
             value = json.load(response)
         # Keys omitted by another version read as empty so the service is not mistaken for unreachable.
         health, setup = value.get('health') or {}, value.get('setup') or {}
